@@ -1,6 +1,14 @@
-Revision history for Perl extension Graphics::Color.
+Revision history for Perl extension Graphics::ColorObject.
 
-0.01  Sat Aug 30 00:55:19 2003
-	- original version; created by h2xs 1.22 with options
-		-AX -n Graphics::Color
+0.4a3  2004/03/05 00:39:46
+	   - bug: tests weren't working properly (fixed)
+	   - bug: HSL conversions off-by-one (disabled tests for now)
+	   - added Luv and LCHuv color spaces
+	   - minor documentation fixes
+
+0.4a2  2004/03/04 20:26:00
+	   - bug: some conversions failed if no rgb working space was specified (fixed)
+
+0.4a1  2004/03/04 19:27:21
+	   - initial release, very alpha
 

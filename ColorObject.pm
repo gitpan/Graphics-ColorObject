@@ -2,7 +2,7 @@ package Graphics::ColorObject;
 
 # Copyright 2003 by Alex Izvorski
 
-# $Id: ColorObject.pm,v 1.4 2004/03/04 20:26:00 ai Exp $
+# $Id: ColorObject.pm,v 1.5 2004/03/05 00:39:46 ai Exp $
 
 =head1 NAME
 
@@ -31,7 +31,7 @@ This version is a complete rewrite since the previous version, 0.3a2. The API is
 
 Use this module to convert between all the common color spaces.  As a pure Perl module, it is not very fast, and so it you want to convert entire images, this is probably not what you want.  The emphasis is on completeness and accurate conversion.
 
-Supported color spaces are: RGB (including sRGB, Rec 601, Rec 709, ITU, and about a dozen other RGB spaces), CMY, CMYK, HSL, HSV, XYZ, xyY, Lab, LCHab, YPbPr, YCbCr.  Future support is planned for Luv, LCHuv, YUV, YIQ and possibly others.
+Supported color spaces are: RGB (including sRGB, Rec 601, Rec 709, ITU, and about a dozen other RGB spaces), CMY, CMYK, HSL, HSV, XYZ, xyY, Lab, LCHab, Luv, LCHuv, YPbPr, YCbCr.  Future support is planned for YUV, YIQ, YCC and possibly others.
 
 Conversion between different RGB working spaces, and between different white-points, is fully supported.
 
@@ -101,7 +101,7 @@ our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 
 our @EXPORT = qw();
 
-our $VERSION = '0.4a1';
+our $VERSION = '0.4a3';
 
 use Carp;
 use POSIX qw(pow);
@@ -176,7 +176,7 @@ sub new_RGB
 	return $this;
 }
 
-=head2 $color = Graphics::ColorObject->new_RGB([$R, $G, $B])
+=head2 $color = Graphics::ColorObject->new_RGB255([$R, $G, $B])
 
 =cut 
 
@@ -186,7 +186,7 @@ sub new_RGB255
 	return &new_RGB($pkgname, &RGB255_to_RGB($rgb255), %opts);
 }
 
-=head2 $color = Graphics::ColorObject->new_RGB([$R, $G, $B])
+=head2 $color = Graphics::ColorObject->new_RGBhex($rgbhex)
 
 =cut 
 
@@ -220,22 +220,28 @@ sub new_LCHab
 	return $this;
 }
 
-=head2 $color = Graphics::ColorObject->new_Luv([$L, $u, $v]) UNIMPLEMENTED
+=head2 $color = Graphics::ColorObject->new_Luv([$L, $u, $v])
 
 =cut 
 
 sub new_Luv
 {
-	# TODO
+	my ($pkgname, $luv, %opts) = @_;
+	my $this = &new($pkgname, %opts);
+	$this->{xyz} = &Luv_to_XYZ($luv, $this->get_XYZ_white());
+	return $this;
 }
 
-=head2 $color = Graphics::ColorObject->new_LCHuv([$L, $C, $H]) UNIMPLEMENTED
+=head2 $color = Graphics::ColorObject->new_LCHuv([$L, $C, $H])
 
 =cut 
 
 sub new_LCHuv
 {
-	# TODO
+	my ($pkgname, $lch, %opts) = @_;
+	my $this = &new($pkgname, %opts);
+	$this->{xyz} = &Luv_to_XYZ(&LCHuv_to_Luv($lch), $this->get_XYZ_white());
+	return $this;
 }
 
 =head2 $color = Graphics::ColorObject->new_HSL([$H, $S, $L])
@@ -369,22 +375,24 @@ sub as_LCHab
 	return &Lab_to_LCHab( &XYZ_to_Lab($this->{xyz}, $this->get_XYZ_white()) );
 }
 
-=head2 ($L, $u, $v) = @{ $color->as_Luv() } UNIMPLEMENTED
+=head2 ($L, $u, $v) = @{ $color->as_Luv() }
 
 =cut 
 
 sub as_Luv
 {
-	# TODO
+	my ($this) = @_;
+	return &XYZ_to_Luv($this->{xyz}, $this->get_XYZ_white());
 }
 
-=head2 ($L, $C, $H) = @{ $color->as_LCHuv() } UNIMPLEMENTED
+=head2 ($L, $C, $H) = @{ $color->as_LCHuv() }
 
 =cut 
 
 sub as_LCHuv
 {
-	# TODO
+	my ($this) = @_;
+	return &Luv_to_LCHuv( &XYZ_to_Luv($this->{xyz}, $this->get_XYZ_white()) );
 }
 
 =head2 ($H, $S, $L) = @{ $color->as_HSL() }
@@ -477,8 +485,7 @@ sub as_YIQ
 sub get_XYZ_white
 {
 	my ($this, %opts) = @_;
-	my $white_point = $opts{white_point} || $this->{white_point} || 
-		&_get_RGB_space_by_name($this->{space})->{white_point};
+	my $white_point = $opts{white_point} || $this->{white_point};
 	my $xy = $WHITE_POINTS{ $white_point };
 	if (! $xy)
 	{
@@ -550,7 +557,7 @@ sub equals
 
 sub list_colorspaces
 {
-	return qw(RGB XYZ xyY Lab LCHab YCbCr YPbPr HSL HSV); # Luv LCHuv YUV YIQ
+	return qw(RGB XYZ xyY Lab LCHab Luv LCHuv YCbCr YPbPr HSV); # HSL is buggy; YUV YIQ not yet implemented
 }
 
 sub list_rgb_spaces
@@ -700,22 +707,104 @@ sub Lab_to_RGB
 
 sub XYZ_to_Luv
 {
-	# TODO
+	my ($xyz, $xyz_white) = @_;
+	my ($X, $Y, $Z) = @{$xyz};
+	my ($Xw, $Yw, $Zw) = @{$xyz_white};
+	my ($L, $u, $v);
+
+	my $epsilon =  0.008856;
+	my $kappa = 903.3;
+
+	my ($yr) = ( $Y /  $Yw );
+
+	if ($yr > $epsilon) { $L = 116 * pow($yr, 1/3) - 16; }
+	else { $L = $kappa*$yr; }
+
+	my ($up, $vp);
+	my ($upw, $vpw);
+
+	($upw, $vpw) = ( 4 * $Xw / ( $Xw + 15 * $Yw + 3 * $Zw ),
+						9 * $Yw / ( $Xw + 15 * $Yw + 3 * $Zw ) );
+
+	if (! ($X == 0 && $Y == 0 && $Z == 0))
+	{
+		($up, $vp) = ( 4 * $X / ( $X + 15 * $Y + 3 * $Z ),
+					   9 * $Y / ( $X + 15 * $Y + 3 * $Z ) );
+	}
+	else
+	{
+		($up, $vp) = ($upw, $vpw);
+	}
+
+	($u, $v) = ( 13 * $L * ($up - $upw),
+				 13 * $L * ($vp - $vpw) );
+
+	return [ $L, $u, $v ];
 }
 
 sub Luv_to_XYZ
 {
-	# TODO
+	my ($luv, $xyz_white) = @_;
+	my ($L, $u, $v) = @{$luv};
+	my ($Xw, $Yw, $Zw) = @{$xyz_white};
+	my ($X, $Y, $Z);
+
+	my $epsilon =  0.008856;
+	my $kappa = 903.3;
+
+	if ($L > $kappa*$epsilon) { $Y = pow( ($L + 16)/116, 3 ); } else { $Y = $L / $kappa; }
+
+	my ($upw, $vpw) = ( 4 * $Xw / ( $Xw + 15 * $Yw + 3 * $Zw ),
+						9 * $Yw / ( $Xw + 15 * $Yw + 3 * $Zw ) );
+
+	if (! ($L == 0 && $u == 0 && $v == 0))
+	{
+		my $a = (1/3)*( ((52 * $L) / ($u + 13 * $L * $upw)) - 1 );
+		my $b = -5 * $Y;
+		my $c = -1/3;
+		my $d = $Y * ( ((39 * $L) / ($v + 13 * $L * $vpw)) - 5 );
+		
+		$X = ($d - $b)/($a - $c);
+		$Z = $X * $a + $b;
+	}
+	else
+	{
+		($X, $Z) = (0.0, 0.0);
+	}
+
+	return [ $X, $Y, $Z ];
 }
 
 sub Luv_to_LCHuv
 {
-	# TODO
+	my ($luv) = @_;
+	my ($L, $u, $v) = @{$luv};
+	my ($C, $H);
+
+	$C = sqrt( $u*$u + $v*$v );
+	$H = atan2( $v, $u );
+	$H = rad2deg($H);
+
+	return [ $L, $C, $H ];
 }
 
 sub LCHuv_to_Luv
 {
-	# TODO
+	my ($lch) = @_;
+	my ($L, $C, $H) = @{$lch};
+	my ($u, $v);
+
+	$H = deg2rad($H);
+	my $th = tan($H);
+	$u = $C / sqrt( $th * $th + 1 );
+	$v = sqrt($C*$C - $u*$u);
+
+	#$H = $H - 2*pi*int($H / 2*pi); # convert H to 0..2*pi - this seems to be wrong
+	if ($H < 0) { $H = $H + 2*pi; }
+	if ($H > pi/2 && $H < 3*pi/2) { $u = - $u; }
+	if ($H > pi) { $v = - $v; }
+
+	return [ $L, $u, $v ];
 }
 
 sub XYZ_to_xyY
