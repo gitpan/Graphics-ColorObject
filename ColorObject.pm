@@ -1,8 +1,10 @@
 package Graphics::ColorObject;
 
-# Copyright 2003 by Alex Izvorski
+# Copyright 2003-2004 by Alex Izvorski
 
-# $Id: ColorObject.pm,v 1.5 2004/03/05 00:39:46 ai Exp $
+# Portions Copyright 2001-2003 by Alfred Reibenschuh
+
+# $Id: ColorObject.pm,v 1.7 2004/03/09 01:05:32 ai Exp $
 
 =head1 NAME
 
@@ -18,9 +20,9 @@ This version is a complete rewrite since the previous version, 0.3a2. The API is
 
   use Graphics::ColorObject;
   
-  # rgb to hsl
+  # rgb to hsv
   $color = Graphics::ColorObject->new_RGB([$r, $g, $b]);
-  ($h, $s, $l) = @{ $color->as_HSL() };
+  ($h, $s, $v) = @{ $color->as_HSV() };
   
   # one rgb space to another (NTSC to PAL)
   $color = Graphics::ColorObject->new_RGB([$r, $g, $b], space=>'NTSC');
@@ -60,9 +62,9 @@ Functions that use an angle value always express it in degrees.  That includes t
 
 =cut 
 
-use 5.008;
-#use strict;
-#use warnings;
+use 5.006;
+use strict;
+use warnings;
 
 require Exporter;
 
@@ -101,7 +103,7 @@ our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 
 our @EXPORT = qw();
 
-our $VERSION = '0.4a3';
+our $VERSION = '0.4a4';
 
 use Carp;
 use POSIX qw(pow);
@@ -109,13 +111,15 @@ use Math::Trig;
 
 ############ OO interface ##############
 
+use vars qw(%RGB_SPACES %WHITE_POINTS %COLORNAMES);
+
 sub new
 {
 	my ($pkgname, @opts) = @_;
 
 	my $this = +{};
 	bless $this, $pkgname;
-	my $col = &namecolor($opts[0]);
+	my $col = &Graphics::ColorObject::namecolor($opts[0]);
 	if ($col)
 	{
 		shift(@opts);
@@ -129,12 +133,6 @@ sub new
 		my %opts = @opts;
 		$this->{space} = $opts{space};
 		$this->{white_point} = $opts{white_point};
-	}
-
-	if (! $this->{space} || ! $this->{white_point})
-	{
-		my $s = &_get_RGB_space_by_name($this->{space});
-		$this->{white_point} = $s->{white_point};
 	}
 
 	return $this;
@@ -352,7 +350,7 @@ sub as_RGBhex
 sub as_xyY
 {
 	my ($this) = @_;
-	return &XYZ_to_xyY($this->{xyz});
+	return &XYZ_to_xyY($this->{xyz}, $this->get_XYZ_white());
 }
 
 =head2 ($L, $a, $b) = @{ $color->as_Lab() }
@@ -462,6 +460,7 @@ sub as_YCbCr
 sub as_YCC
 {
 	# TODO
+	croak('conversion to/from this color space not yet implemented');
 }
 
 =head2 ($Y, $U, $V) = @{ $color->as_YUV() } UNIMPLEMENTED
@@ -471,6 +470,7 @@ sub as_YCC
 sub as_YUV
 {
 	# TODO
+	croak('conversion to/from this color space not yet implemented');
 }
 
 =head2 ($Y, $I, $Q) = @{ $color->as_YIQ() } UNIMPLEMENTED
@@ -480,29 +480,35 @@ sub as_YUV
 sub as_YIQ
 {
 	# TODO
+	croak('conversion to/from this color space not yet implemented');
 }
 
+# returns the XYZ value of the white point actually used (always defined, default is D65)
 sub get_XYZ_white
 {
 	my ($this, %opts) = @_;
-	my $white_point = $opts{white_point} || $this->{white_point};
+	my $white_point = $opts{white_point} || $this->{white_point} || 
+		&_get_RGB_space_by_name( $opts{space} || $this->{space} )->{white_point};
+
+	$white_point = &_check_white_point($white_point);
+
 	my $xy = $WHITE_POINTS{ $white_point };
-	if (! $xy)
-	{
-		warn "no white point specified in operation that requires it, defaulting to D65";
-		$xy = $WHITE_POINTS{ 'D65' };
-	}
+
 	my ($x, $y) = @{ $xy };
 	return &xyY_to_XYZ([$x, $y, 1.0]);
 	#return &RGB_to_XYZ([1, 1, 1], $this->{space});
 }
 
+# returns the name of the white point actually used
+# FIXME should be always defined
 sub get_white_point
 {
 	my ($this) = @_;
 	return $this->{white_point};
 }
 
+# returns the name of the rgb space actually used
+# FIXME should be always defined
 sub get_rgb_space
 {
 	my ($this) = @_;
@@ -513,7 +519,7 @@ sub set_rgb_space
 {
 	my ($this, $space) = @_;
 	my $s = &_get_RGB_space_by_name($space);
-	if ($this->{white_point} ne $s->{white_point})
+	if ($this->get_white_point() ne $s->{white_point})
 	{
 		$this->set_white_point($s->{white_point});
 	}
@@ -524,11 +530,15 @@ sub set_rgb_space
 sub set_white_point
 {
 	my ($this, $white_point) = @_;
-	if ($this->{white_point} ne $white_point)
+
+	$white_point = &_check_white_point($white_point);
+
+	if (&_check_white_point($this->{white_point}) ne $white_point)
 	{
 		$this->{xyz} = &XYZ_change_white_point($this->{xyz}, $this->get_XYZ_white(), $this->get_XYZ_white($white_point));
 		$this->{white_point} = $white_point;
 	}
+
 	return $this;
 }
 
@@ -1211,7 +1221,7 @@ sub XYZ_change_white_point
 			 [ 0, $cone_new->[1]/$cone_old->[1], 0 ],
 			 [ 0, 0, $cone_new->[2]/$cone_old->[2] ]];
 			 
-	$m = &_mult_m33_m33($ma, &_mult_m33_m33($q, $ma_star));
+	my $m = &_mult_m33_m33($ma, &_mult_m33_m33($q, $ma_star));
 
 	my $xyz_new = &_mult_v3_m33($xyz, $m);
 
@@ -1223,19 +1233,46 @@ sub XYZ_change_white_point
 sub _get_RGB_space_by_name
 {
 	my ($space) = @_;
+	# FIXME the logic here is a bit convoluted, this could be cleaned up a lot
+
+	if (! defined $space)
+	{
+		# carp("no rgb space specified in operation that requires it, defaulting to sRGB");
+		$space = 'sRGB';
+	}
+	elsif (! $RGB_SPACES{ $space })
+	{
+		carp("rgb space not found: ".$space.", defaulting to sRGB");
+		$space = 'sRGB';
+	}
+
 	my $s = $RGB_SPACES{$space};
-	if (! $space) { warn "no RGB space specified in operation that requires it, defaulting to sRGB"; }
-	elsif (! $s) { warn "no such RGB space: $space, defaulting to sRGB"; }
-	if (! ref $s)
+	if ($s && ! ref $s)
 	{
 		$s = $RGB_SPACES{$s}; # follow aliases
 	}
-	if (! $s)
-	{
-		$s = $RGB_SPACES{'sRGB'}; # default
-	}
+
 	return $s;
 }
+
+sub _check_white_point
+{
+	my ($white_point) = @_;
+
+	if (! defined $white_point)
+	{
+		# carp("no white point specified in operation that requires it, defaulting to D65");
+		$white_point = 'D65';
+	}
+	elsif (! $WHITE_POINTS{ $white_point })
+	{
+		carp("white point not found: ". $white_point.", defaulting to D65");
+		$white_point = 'D65';
+	}
+
+	return $white_point;
+}
+
 
 sub _mult_v3_m33
 {
@@ -1315,9 +1352,9 @@ sub _is_zero
 	return (abs($v) < 0.000001);
 }
 
-sub _min { my $min = @_[0]; foreach my $v (@_) { if ($v <= $min) { $min = $v; } }; return $min; }
+sub _min { my $min = shift(@_); foreach my $v (@_) { if ($v <= $min) { $min = $v; } }; return $min; }
 
-sub _max { my $max = @_[0]; foreach my $v (@_) { if ($v >= $max) { $max = $v; } }; return $max; }
+sub _max { my $max = shift(@_); foreach my $v (@_) { if ($v >= $max) { $max = $v; } }; return $max; }
 
 ######### colorspace tables ########
 
@@ -1460,9 +1497,11 @@ Some color transformations are not exactly reversible.  In particular, conversio
 
 There is no way to choose a white point or RGB space other than the built-in ones.
 
-There is no way to choose any other color-adaptation algorithm than the Bradford algorithm.
+There is no way to choose any other color-adaptation algorithm than the Bradford algorithm. 
 
 There is no way to check whether a value is within gamut for a particular space.
+
+Support for CMYK is very basic, it relies on assumptions that completely do not work in the physical world.  If you tried to convert an image to CMYK for printing using these functions, the results will not be very good, to say the least.
 
 =head1 SEE ALSO
 
@@ -1494,7 +1533,7 @@ Timo Autiokari E<lt>timo.autiokari@aim-dtp.netE<gt> for information on white poi
 
 Copyright 2003-2004 by Alex Izvorski
 
-(portions Copyright by Alfred Reibenschuh)
+Portions Copyright 2001-2003 by Alfred Reibenschuh
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself. 
@@ -1544,11 +1583,13 @@ sub addLightness { my ($this, $l2) = @_; my ($h,$s,$l)=$this->asHSL; $this->setH
 sub setLightness { my ($this, $l2) = @_; my ($h,$s,$l)=$this->asHSL; $this->setHSL($h,$s,$l2); }
 
 use Graphics::ColorNames;
-tie %_colornames, 'Graphics::ColorNames', qw(HTML Windows Netscape X);
+
+our %COLORNAMES;
+tie %COLORNAMES, 'Graphics::ColorNames', qw(HTML Windows Netscape X);
 
 sub namecolor {
 	my $name=lc(shift @_);
-	$name=~s/[^\#!%\&a-z0-9]//cg;
+	$name=~s/[^\#!%\&a-z0-9]//g;
 	my $col;
 	my $opt=shift @_;
 	if($name=~/^#/) {
@@ -1658,9 +1699,9 @@ sub namecolor {
 			$col=[$r,$g,$b];
 		}
 	} else {
-		if ($_colornames{$name})
+		if ($COLORNAMES{$name})
 		{
-			($r, $g, $b) = &Graphics::ColorNames::hex2tuple($_colornames{$name});
+			my ($r, $g, $b) = &Graphics::ColorNames::hex2tuple($COLORNAMES{$name});
 			($r, $g, $b) = map { $_/0xff } ($r, $g, $b);
 			$col=[$r,$g,$b];
 		}
