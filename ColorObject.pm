@@ -2,7 +2,7 @@ package Graphics::ColorObject;
 
 # Copyright 2003 by Alex Izvorski
 
-# $Id: ColorObject.pm,v 1.2 2004/03/04 17:33:46 ai Exp $
+# $Id: ColorObject.pm,v 1.4 2004/03/04 20:26:00 ai Exp $
 
 =head1 NAME
 
@@ -131,7 +131,7 @@ sub new
 		$this->{white_point} = $opts{white_point};
 	}
 
-	if ($this->{space} && ! $this->{white_point})
+	if (! $this->{space} || ! $this->{white_point})
 	{
 		my $s = &_get_RGB_space_by_name($this->{space});
 		$this->{white_point} = $s->{white_point};
@@ -477,9 +477,14 @@ sub as_YIQ
 sub get_XYZ_white
 {
 	my ($this, %opts) = @_;
-	my $white_point = $opts{white_point} || $this->{white_point};
+	my $white_point = $opts{white_point} || $this->{white_point} || 
+		&_get_RGB_space_by_name($this->{space})->{white_point};
 	my $xy = $WHITE_POINTS{ $white_point };
-	# TODO default if not found?
+	if (! $xy)
+	{
+		warn "no white point specified in operation that requires it, defaulting to D65";
+		$xy = $WHITE_POINTS{ 'D65' };
+	}
 	my ($x, $y) = @{ $xy };
 	return &xyY_to_XYZ([$x, $y, 1.0]);
 	#return &RGB_to_XYZ([1, 1, 1], $this->{space});
