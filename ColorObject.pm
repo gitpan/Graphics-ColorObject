@@ -2,7 +2,7 @@ package Graphics::ColorObject;
 
 use vars qw( $VERSION );
 
-( $VERSION ) = '$Revisioning: 0.3a1 $ ' =~ /\$Revisioning:\s+([^\s]+)/;
+( $VERSION ) = '$Revisioning: 0.3a2 $ ' =~ /\$Revisioning:\s+([^\s]+)/;
 
 use POSIX;
 
@@ -1236,7 +1236,7 @@ Sets the $cl's rgb values using 6 hex-nibbles.
 sub setHex {
 	my $self=shift @_;
 	my ($hx)=@_;
-	my($r,$g,$b) = map { $_/255 } unpack('H3',$hx);
+	my($r,$g,$b) = map { $_/255 } unpack("C*",pack("N",hex($hx)<<8));
 	$self->setRGB($r,$g,$b);	
 }
 

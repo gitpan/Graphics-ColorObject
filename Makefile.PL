@@ -4,7 +4,7 @@
 
 WriteMakefile (
 	NAME		=>	"Graphics::ColorObject",
-	VERSION		=>	"0.3a1",
+	VERSION		=>	"0.3a2",
 	AUTHOR		=>	"areibens\@cpan.org",
 	ABSTRACT	=>	"Color Object",
 	dist		=>	{
@@ -14,7 +14,7 @@ WriteMakefile (
 	},
 	MAN1PODS	=>	{},
 	MAN3PODS	=>	{},
-	BINARY_LOCATION	=>  "Graphics-ColorObject-0.3a1-ppd.tar.gz",
+	BINARY_LOCATION	=>  "Graphics-ColorObject-0.3a2-ppd.tar.gz",
 );
 
 sub MY::postamble
@@ -23,8 +23,8 @@ sub MY::postamble
     return <<"EOT";
 
 ppdist: all ppd pm_to_blib
-	tar zcvf Graphics-ColorObject-0.3a1-ppd.tar.gz blib
-	\$(MV) Graphics-ColorObject.ppd Graphics-ColorObject-0.3a1.ppd
+	tar zcvf Graphics-ColorObject-0.3a2-ppd.tar.gz blib
+	\$(MV) Graphics-ColorObject.ppd Graphics-ColorObject-0.3a2.ppd
 
 distme: all dist ppd ppdist
 
